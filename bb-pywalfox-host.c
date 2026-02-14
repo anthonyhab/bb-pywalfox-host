@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
 #include <stdint.h>
@@ -146,21 +147,62 @@ int main(int argc, char *argv[]) {
     char path[MAX_PATH];
     snprintf(path, sizeof(path), "%s%s", home, COLORS_PATH_SUFFIX);
 
-    // Send initial theme
-    parse_and_send(path);
+    // Wait for request from Pywalfox before sending initial colors
+    uint32_t req_len;
+    if (fread(&req_len, 4, 1, stdin) == 1 && req_len < 1024) {
+        char req[1024];
+        if (fread(req, 1, req_len, stdin) == req_len) {
+            req[req_len] = '\0';
+            // Check if Pywalfox requested colors
+            if (strstr(req, "\"action\"") && strstr(req, "\"colors\"")) {
+                parse_and_send(path);
+            }
+        }
+    }
 
-    // Set up inotify
+    // Set up inotify for file change notifications
     int fd = inotify_init();
     if (fd < 0) return 1;
 
     int wd = inotify_add_watch(fd, path, IN_MODIFY | IN_CLOSE_WRITE);
     if (wd < 0) return 1;
 
+    // Main loop: watch for file changes and send updates
     char buf[BUF_SIZE];
+    fd_set readfds;
+    
     while (1) {
-        int len = read(fd, buf, BUF_SIZE);
-        if (len <= 0) break;
-        parse_and_send(path);
+        FD_ZERO(&readfds);
+        FD_SET(fd, &readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        
+        int max_fd = (fd > STDIN_FILENO) ? fd : STDIN_FILENO;
+        
+        if (select(max_fd + 1, &readfds, NULL, NULL, NULL) < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        
+        // Check for file changes
+        if (FD_ISSET(fd, &readfds)) {
+            int len = read(fd, buf, BUF_SIZE);
+            if (len <= 0) break;
+            parse_and_send(path);
+        }
+        
+        // Check for additional requests from Pywalfox
+        if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            uint32_t msg_len;
+            if (fread(&msg_len, 4, 1, stdin) == 1 && msg_len < 1024) {
+                char msg[1024];
+                if (fread(msg, 1, msg_len, stdin) == msg_len) {
+                    msg[msg_len] = '\0';
+                    if (strstr(msg, "\"action\"") && strstr(msg, "\"colors\"")) {
+                        parse_and_send(path);
+                    }
+                }
+            }
+        }
     }
 
     return 0;
