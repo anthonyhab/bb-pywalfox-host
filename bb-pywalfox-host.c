@@ -9,9 +9,9 @@
 #include <sys/select.h>
 #include <fcntl.h>
 
-#include "../bb-common/native_messaging.h"
-#include "../bb-common/json_utils.h"
-#include "../bb-common/config_utils.h"
+#include "bb-common/native_messaging.h"
+#include "bb-common/json_utils.h"
+#include "bb-common/config_utils.h"
 
 #define COLORS_PATH "/.cache/wal/colors.json"
 #define EVENT_SIZE (sizeof(struct inotify_event))
