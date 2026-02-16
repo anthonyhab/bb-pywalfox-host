@@ -1,4 +1,4 @@
-# Maintainer: Anthony Habash <bb@hab.rip>
+# Maintainer: anthonyhab <bb@hab.rip>
 
 pkgname=bb-pywalfox-host
 pkgver=0.1.0
