@@ -1,0 +1,7 @@
+# Binaries (rebuild from source)
+bb-pywalfox-host
+bb-pywalfox-host-new
+bb-darkreader-host
+
+# Build artifacts
+*.o

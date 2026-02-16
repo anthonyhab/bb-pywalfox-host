@@ -4,206 +4,195 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/inotify.h>
-#include <sys/stat.h>
-#include <stdint.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/select.h>
+#include <fcntl.h>
 
-#define COLORS_PATH_SUFFIX "/.cache/wal/colors"
-#define CONFIG_DIR_SUFFIX "/.mozilla/native-messaging-hosts"
+#include "../bb-common/native_messaging.h"
+#include "../bb-common/json_utils.h"
+#include "../bb-common/config_utils.h"
+
+#define COLORS_PATH "/.cache/wal/colors.json"
 #define EVENT_SIZE (sizeof(struct inotify_event))
 #define BUF_SIZE (1024 * (EVENT_SIZE + 16))
-#define MAX_PATH 512
-#define MAX_JSON_SIZE 8192
+#define SOCKET_PATH "/tmp/pywalfox_socket"
 
-static void ensure_config_exists(const char *exe_path) {
-    char config_dir[MAX_PATH];
-    char config_path[MAX_PATH];
-    const char *home = getenv("HOME");
+static void send_colors(char colors[][16], const char *wallpaper) {
+    char json[2048];
+    int pos = 0;
     
-    if (!home) return;
-    
-    snprintf(config_dir, sizeof(config_dir), "%s%s", home, CONFIG_DIR_SUFFIX);
-    snprintf(config_path, sizeof(config_path), "%s/pywalfox.json", config_dir);
-    
-    struct stat st;
-    if (stat(config_path, &st) == 0) return;
-    
-    mkdir(config_dir, 0700);
-    
-    FILE *f = fopen(config_path, "w");
-    if (!f) return;
-    
-    fprintf(f, "{\n");
-    fprintf(f, "  \"name\": \"pywalfox\",\n");
-    fprintf(f, "  \"description\": \"Native messaging host for Pywalfox\",\n");
-    fprintf(f, "  \"path\": \"%s\",\n", exe_path);
-    fprintf(f, "  \"type\": \"stdio\",\n");
-    fprintf(f, "  \"allowed_extensions\": [\"pywalfox@frewacom.org\"]\n");
-    fprintf(f, "}\n");
-    
-    fclose(f);
-    chmod(config_path, 0644);
-}
-
-static char *find_json_value(const char *json, const char *key) {
-    char search[64];
-    snprintf(search, sizeof(search), "\"%s\"", key);
-    
-    const char *pos = strstr(json, search);
-    if (!pos) return NULL;
-    
-    pos = strchr(pos, ':');
-    if (!pos) return NULL;
-    pos++;
-    
-    while (*pos == ' ' || *pos == '\t') pos++;
-    
-    if (*pos == '"') {
-        pos++;
-        const char *end = strchr(pos, '"');
-        if (!end) return NULL;
-        size_t len = end - pos;
-        char *result = malloc(len + 1);
-        if (result) {
-            strncpy(result, pos, len);
-            result[len] = '\0';
-        }
-        return result;
+    pos += snprintf(json + pos, sizeof(json) - pos,
+        "{\"action\":\"action:colors\",\"success\":true,\"data\":{\"colors\":[");
+    for (int i = 0; i < 16; i++) {
+        if (i) pos += snprintf(json + pos, sizeof(json) - pos, ",");
+        pos += snprintf(json + pos, sizeof(json) - pos, "\"%s\"", colors[i]);
     }
+    pos += snprintf(json + pos, sizeof(json) - pos, "],\"wallpaper\":\"%s\"}}", wallpaper);
     
-    return NULL;
-}
-
-static void send_theme(const char *bg, const char *fg, const char *accent) {
-    char json[512];
-    int len = snprintf(json, sizeof(json),
-        "{\"action\":\"colors\",\"success\":true,\"data\":{"
-        "\"background\":\"%s\","
-        "\"foreground\":\"%s\","
-        "\"accent\":\"%s\"}}",
-        bg, fg, accent);
-
-    uint32_t msg_len = len;
-    fwrite(&msg_len, 4, 1, stdout);
-    fwrite(json, 1, len, stdout);
-    fflush(stdout);
+    nm_send_message(json, (size_t)pos);
 }
 
 static void parse_and_send(const char *path) {
     FILE *f = fopen(path, "r");
-    if (!f) return;
+    if (!f) {
+        nm_send_message("{\"success\":false,\"error\":\"no colors\"}", 34);
+        return;
+    }
     
-    char json[MAX_JSON_SIZE];
-    size_t len = fread(json, 1, MAX_JSON_SIZE - 1, f);
+    char json[8192];
+    size_t len = fread(json, 1, sizeof(json) - 1, f);
     json[len] = '\0';
     fclose(f);
     
-    char bg[32] = "#000000";
-    char fg[32] = "#ffffff";
-    char accent[32] = "#ffffff";
-    
-    if (strstr(json, "\"special\"")) {
-        char *bg_val = find_json_value(json, "background");
-        char *fg_val = find_json_value(json, "foreground");
-        char *cursor_val = find_json_value(json, "cursor");
-        
-        if (bg_val) { strncpy(bg, bg_val, 31); free(bg_val); }
-        if (fg_val) { strncpy(fg, fg_val, 31); free(fg_val); }
-        if (cursor_val && strlen(cursor_val) > 0) {
-            strncpy(accent, cursor_val, 31);
-            free(cursor_val);
+    char colors[16][16];
+    for (int i = 0; i < 16; i++) {
+        char key[8], *v;
+        snprintf(key, sizeof(key), "color%d", i);
+        if ((v = bb_json_get(json, key))) {
+            size_t vlen = strlen(v);
+            if (vlen > 15) vlen = 15;
+            memcpy(colors[i], v, vlen);
+            colors[i][vlen] = '\0';
+            free(v);
         } else {
-            char *c2 = find_json_value(json, "color2");
-            if (c2) { strncpy(accent, c2, 31); free(c2); }
+            memcpy(colors[i], "#000000", 8);
         }
     }
-    else if (strstr(json, "\"colors\"")) {
-        char *c0 = find_json_value(json, "color0");
-        char *c7 = find_json_value(json, "color7");
-        char *c2 = find_json_value(json, "color2");
-        
-        if (c0) { strncpy(bg, c0, 31); free(c0); }
-        if (c7) { strncpy(fg, c7, 31); free(c7); }
-        if (c2) { strncpy(accent, c2, 31); free(c2); }
+    
+    static char wallpaper[512];
+    char *w = bb_json_get(json, "wallpaper");
+    if (w) {
+        size_t wlen = strlen(w);
+        if (wlen > 511) wlen = 511;
+        memcpy(wallpaper, w, wlen);
+        wallpaper[wlen] = '\0';
+        free(w);
+    } else {
+        wallpaper[0] = '\0';
     }
     
-    send_theme(bg, fg, accent);
+    send_colors(colors, wallpaper);
+}
+
+static int create_socket(const char *path) {
+    unlink(path);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    
+    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+    size_t plen = strlen(path);
+    if (plen > sizeof(addr.sun_path) - 1) plen = sizeof(addr.sun_path) - 1;
+    memcpy(addr.sun_path, path, plen);
+    addr.sun_path[plen] = '\0';
+    
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) { close(fd); return -1; }
+    chmod(path, 0600);
+    listen(fd, 5);
+    return fd;
+}
+
+static void handle_client(int fd, const char *path) {
+    uint32_t len;
+    if (read(fd, &len, 4) != 4 || len > 1024) { close(fd); return; }
+    
+    char cmd[1025];
+    if (read(fd, cmd, len) != (ssize_t)len) { close(fd); return; }
+    cmd[len] = '\0';
+    
+    if (!strcmp(cmd, "action:update")) parse_and_send(path);
+    else if (!strcmp(cmd, "theme:mode:dark")) nm_send_message("{\"action\":\"theme:mode\",\"data\":\"dark\"}", 33);
+    else if (!strcmp(cmd, "theme:mode:light")) nm_send_message("{\"action\":\"theme:mode\",\"data\":\"light\"}", 34);
+    else if (!strcmp(cmd, "theme:mode:auto")) nm_send_message("{\"action\":\"theme:mode\",\"data\":\"auto\"}", 33);
+    
+    close(fd);
+}
+
+static int send_cmd(const char *msg) {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return 1;
+    
+    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) { close(fd); return 1; }
+    
+    uint32_t len = (uint32_t)strlen(msg);
+    write(fd, &len, 4);
+    write(fd, msg, len);
+    close(fd);
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
-    char exe_path[MAX_PATH];
+    char exe_path[512];
     realpath("/proc/self/exe", exe_path);
     
     const char *home = getenv("HOME");
-    if (!home) return 1;
+    if (!home) { fprintf(stderr, "no HOME\n"); return 1; }
     
-    if (argc > 1 && strcmp(argv[1], "--setup") == 0) {
-        ensure_config_exists(exe_path);
-        printf("Pywalfox config created at:\n");
-        printf("  ~/.mozilla/native-messaging-hosts/pywalfox.json\n");
-        printf("\nPlease restart Firefox to apply changes.\n");
-        return 0;
-    }
+    char path[512];
+    snprintf(path, sizeof(path), "%s%s", home, COLORS_PATH);
+    fprintf(stderr, "path: %s\n", path);
     
-    char path[MAX_PATH];
-    snprintf(path, sizeof(path), "%s%s", home, COLORS_PATH_SUFFIX);
-
-    // Wait for request from Pywalfox before sending initial colors
-    uint32_t req_len;
-    if (fread(&req_len, 4, 1, stdin) == 1 && req_len < 1024) {
-        char req[1024];
-        if (fread(req, 1, req_len, stdin) == req_len) {
-            req[req_len] = '\0';
-            // Check if Pywalfox requested colors
-            if (strstr(req, "\"action\"") && strstr(req, "\"colors\"")) {
-                parse_and_send(path);
-            }
+    if (argc > 1) {
+        if (!strcmp(argv[1], "install")) {
+            bb_config_ensure(exe_path, "pywalfox", "pywalfox@frewacom.org");
+            printf("Pywalfox config created at:\n  ~/.mozilla/native-messaging-hosts/pywalfox.json\n\nPlease restart Firefox.\n");
+            return 0;
+        }
+        if (!strcmp(argv[1], "uninstall")) {
+            bb_config_remove("pywalfox");
+            printf("Uninstalled pywalfox manifest.\n");
+            return 0;
+        }
+        if (!strcmp(argv[1], "update")) return send_cmd("action:update");
+        if (!strcmp(argv[1], "dark")) return send_cmd("theme:mode:dark");
+        if (!strcmp(argv[1], "light")) return send_cmd("theme:mode:light");
+        if (!strcmp(argv[1], "auto")) return send_cmd("theme:mode:auto");
+        if (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
+            printf("bb-pywalfox-host - Native messaging host\n\nUsage: bb-pywalfox-host [ACTION]\n\nActions:\n  start       Start daemon (default, for Firefox)\n  install     Install manifest\n  uninstall   Remove manifest\n  update      Reload colors\n  dark/light  Set theme mode\n");
+            return 0;
         }
     }
-
-    // Set up inotify for file change notifications
-    int fd = inotify_init();
-    if (fd < 0) return 1;
-
-    int wd = inotify_add_watch(fd, path, IN_MODIFY | IN_CLOSE_WRITE);
-    if (wd < 0) return 1;
-
-    // Main loop: watch for file changes and send updates
+    
+    parse_and_send(path);
+    
+    int sock = create_socket(SOCKET_PATH);
+    int inot = inotify_init();
+    if (inot >= 0) inotify_add_watch(inot, path, IN_CLOSE_WRITE);
+    
     char buf[BUF_SIZE];
-    fd_set readfds;
-    
     while (1) {
-        FD_ZERO(&readfds);
-        FD_SET(fd, &readfds);
-        FD_SET(STDIN_FILENO, &readfds);
+        fd_set fds;
+        FD_ZERO(&fds);
+        if (inot >= 0) FD_SET(inot, &fds);
+        if (sock >= 0) FD_SET(sock, &fds);
+        FD_SET(STDIN_FILENO, &fds);
         
-        int max_fd = (fd > STDIN_FILENO) ? fd : STDIN_FILENO;
+        int max = STDIN_FILENO;
+        if (inot > max) max = inot;
+        if (sock > max) max = sock;
         
-        if (select(max_fd + 1, &readfds, NULL, NULL, NULL) < 0) {
-            if (errno == EINTR) continue;
-            break;
+        if (select(max + 1, &fds, NULL, NULL, NULL) < 0) break;
+        
+        if (FD_ISSET(STDIN_FILENO, &fds)) {
+            uint8_t msg[4096];
+            if (nm_read_message(msg, sizeof(msg)) < 0) break;
         }
-        
-        // Check for file changes
-        if (FD_ISSET(fd, &readfds)) {
-            int len = read(fd, buf, BUF_SIZE);
-            if (len <= 0) break;
+        if (sock >= 0 && FD_ISSET(sock, &fds)) {
+            int c = accept(sock, NULL, NULL);
+            if (c >= 0) handle_client(c, path);
+        }
+        if (inot >= 0 && FD_ISSET(inot, &fds)) {
+            read(inot, buf, BUF_SIZE);
             parse_and_send(path);
         }
-        
-        // Check for additional requests from Pywalfox
-        if (FD_ISSET(STDIN_FILENO, &readfds)) {
-            uint32_t msg_len;
-            if (fread(&msg_len, 4, 1, stdin) == 1 && msg_len < 1024) {
-                char msg[1024];
-                if (fread(msg, 1, msg_len, stdin) == msg_len) {
-                    msg[msg_len] = '\0';
-                    if (strstr(msg, "\"action\"") && strstr(msg, "\"colors\"")) {
-                        parse_and_send(path);
-                    }
-                }
-            }
-        }
     }
-
+    
+    if (sock >= 0) { close(sock); unlink(SOCKET_PATH); }
+    if (inot >= 0) close(inot);
     return 0;
 }

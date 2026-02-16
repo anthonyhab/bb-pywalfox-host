@@ -1,11 +1,11 @@
 # Maintainer: Anthony Habash <bb@hab.rip>
 
 pkgname=bb-pywalfox-host
-pkgver=1.0.0
+pkgver=0.1.0
 pkgrel=1
 pkgdesc="Native messaging host for syncing pywal colors with Pywalfox (C version)"
 arch=('x86_64')
-url="https://github.com/bb-auth/bb-pywalfox-host"
+url="https://github.com/anthonyhab/bb-pywalfox-host"
 license=('MIT')
 depends=('glibc')
 makedepends=('gcc')
@@ -24,6 +24,6 @@ package() {
 
 post_install() {
     echo "==> To complete installation, run:"
-    echo "==>   bb-pywalfox-host --setup"
+    echo "==>   bb-pywalfox-host install"
     echo "==> Then restart Firefox"
 }
