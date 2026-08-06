@@ -29,9 +29,12 @@
 #define HOST_VERSION "2.7.4"
 #define CLIENT_READ_TIMEOUT_MS 5
 #define WATCH_RETRY_MS 50
+#define BOOT_CLEAR_DELAY_MS 3000
 #define INOTIFY_BUFFER_SIZE (16 * 1024)
 #define COLORS_FILE_SIZE (64 * 1024)
 #define RESPONSE_SIZE 4096
+
+static int64_t monotonic_milliseconds(void);
 
 static char last_colors_response[RESPONSE_SIZE];
 
@@ -395,14 +398,29 @@ static void handle_css_action(const char *action, const char *message) {
     free(target);
 }
 
+static int64_t boot_clear_deadline = 0;
+
+static int64_t boot_clear_delay_ms(void) {
+    const char *override = getenv("PYWALFOX_BOOT_CLEAR_DELAY_MS");
+    if (override && override[0]) {
+        char *end = NULL;
+        const long value = strtol(override, &end, 10);
+        if (end != override && value >= 0) return value;
+    }
+    return BOOT_CLEAR_DELAY_MS;
+}
+
 static void handle_native_message(const char *message, const char *colors_path) {
     static int boot_fallback_cleared = 0;
     if (!boot_fallback_cleared) {
-        /* First extension message proves the extension is booted: the
-         * boot-time page fallback is no longer needed (and would otherwise
-         * keep darkening sites whose theme is toggled off). */
+        /* First extension message proves the extension is booted — but the
+         * fallback must outlive it: restored pages load for another second
+         * or two and darkreader's first tint lags their first paint. Clear
+         * on a deadline so those pages stay dark, then stop darkening
+         * sites whose theme is toggled off. */
         boot_fallback_cleared = 1;
-        css_remove_boot_fallback();
+        boot_clear_deadline =
+            monotonic_milliseconds() + boot_clear_delay_ms();
     }
 
     char action[64];
@@ -704,6 +722,11 @@ int main(int argc, char *argv[]) {
             rearm_requested = 0;
             css_write_boot_fallback(colors_path);
         }
+        if (boot_clear_deadline &&
+            monotonic_milliseconds() >= boot_clear_deadline) {
+            boot_clear_deadline = 0;
+            css_remove_boot_fallback();
+        }
         if (inotify_fd < 0) {
             inotify_fd = setup_inotify(
                 colors_path,
@@ -733,7 +756,17 @@ int main(int argc, char *argv[]) {
             .tv_sec = 0,
             .tv_usec = WATCH_RETRY_MS * 1000,
         };
-        struct timeval *timeout = inotify_fd < 0 ? &retry_timeout : NULL;
+        struct timeval clear_timeout;
+        struct timeval *timeout = NULL;
+        if (inotify_fd < 0) {
+            timeout = &retry_timeout;
+        } else if (boot_clear_deadline) {
+            int64_t remaining = boot_clear_deadline - monotonic_milliseconds();
+            if (remaining < 1) remaining = 1;
+            clear_timeout.tv_sec = (time_t)(remaining / 1000);
+            clear_timeout.tv_usec = (suseconds_t)((remaining % 1000) * 1000);
+            timeout = &clear_timeout;
+        }
         if (select(maximum + 1, &descriptors, NULL, NULL, timeout) < 0) {
             if (errno == EINTR) continue;
             break;

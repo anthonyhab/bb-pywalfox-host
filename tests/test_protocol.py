@@ -285,6 +285,7 @@ def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
     environment["PYWALFOX_COLORS_PATH"] = str(colors_path)
     environment["PYWALFOX_SOCKET_PATH"] = str(socket_path)
     environment["PYWALFOX_PROFILE_PATH"] = str(profile_path)
+    environment["PYWALFOX_BOOT_CLEAR_DELAY_MS"] = "100"
 
     fallback = profile_path / "chrome" / "palette-boot.css"
     process = subprocess.Popen(
@@ -334,6 +335,7 @@ def test_sigterm_rearms_fallback(root: Path, base_environment: dict) -> None:
     environment = base_environment.copy()
     environment["PYWALFOX_PROFILE_PATH"] = str(profile_path)
     environment["PYWALFOX_SOCKET_PATH"] = str(socket_path)
+    environment["PYWALFOX_BOOT_CLEAR_DELAY_MS"] = "100"
 
     fallback = profile_path / "chrome" / "palette-boot.css"
     process = subprocess.Popen(
