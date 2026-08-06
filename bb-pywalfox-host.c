@@ -26,8 +26,8 @@
 #define DEFAULT_COLORS_SUFFIX "/.cache/wal/colors.json"
 #define DEFAULT_SOCKET_PATH "/tmp/pywalfox_socket"
 #define HOST_VERSION "2.7.4"
-#define CLIENT_READ_TIMEOUT_MS 25
-#define WATCH_RETRY_MS 250
+#define CLIENT_READ_TIMEOUT_MS 5
+#define WATCH_RETRY_MS 50
 #define INOTIFY_BUFFER_SIZE (16 * 1024)
 #define COLORS_FILE_SIZE (64 * 1024)
 #define RESPONSE_SIZE 4096
