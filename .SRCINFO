@@ -1,6 +1,6 @@
 pkgbase = bb-pywalfox-host
 	pkgdesc = Native messaging host for syncing pywal colors with Pywalfox (C version)
-	pkgver = 0.2.1
+	pkgver = 0.2.2
 	pkgrel = 1
 	url = https://github.com/anthonyhab/bb-pywalfox-host
 	arch = x86_64
@@ -10,7 +10,7 @@ pkgbase = bb-pywalfox-host
 	depends = glibc
 	depends = json-c
 	options = !strip
-	source = bb-pywalfox-host-0.2.1.tar.gz::https://github.com/anthonyhab/bb-pywalfox-host/archive/refs/tags/v0.2.1.tar.gz
-	sha256sums = d770d070f0da373d571190beb552c139ecaedd781858bc1c2c601488b87431ae
+	source = bb-pywalfox-host-0.2.2.tar.gz::https://github.com/anthonyhab/bb-pywalfox-host/archive/refs/tags/v0.2.2.tar.gz
+	sha256sums = e50aae362e30bd18f268797f7bb973442b795729d8a1afb5e5c4b2a422ae9586
 
 pkgname = bb-pywalfox-host
