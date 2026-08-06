@@ -2,6 +2,7 @@
 import json
 import os
 import select
+import signal
 import socket
 import struct
 import subprocess
@@ -270,6 +271,7 @@ def main() -> None:
 
         test_self_healing_watch(root, environment)
         test_boot_fallback_lifecycle(root, environment)
+        test_sigterm_rearms_fallback(root, environment)
         test_profiles_ini_default_resolution(root)
 
 def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
@@ -320,6 +322,46 @@ def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
         stop_process(process)
 
 
+
+
+def test_sigterm_rearms_fallback(root: Path, base_environment: dict) -> None:
+    """Firefox may kill the host without a clean EOF; SIGTERM must re-arm
+    the boot fallback for the next session."""
+    socket_path = root / "sigterm.sock"
+    profile_path = root / "sigterm-profile"
+    profile_path.mkdir()
+
+    environment = base_environment.copy()
+    environment["PYWALFOX_PROFILE_PATH"] = str(profile_path)
+    environment["PYWALFOX_SOCKET_PATH"] = str(socket_path)
+
+    fallback = profile_path / "chrome" / "palette-boot.css"
+    process = subprocess.Popen(
+        [HOST, "start"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+        env=environment,
+    )
+    try:
+        send(process, {"action": "debug:version"})
+        assert receive(process, 1.0)["action"] == "debug:version"
+        deadline = time.monotonic() + 1.0
+        while fallback.exists():
+            assert time.monotonic() < deadline, "fallback not removed after boot"
+            time.sleep(0.02)
+
+        process.send_signal(signal.SIGTERM)
+        deadline = time.monotonic() + 1.0
+        while not fallback.exists():
+            assert time.monotonic() < deadline, "fallback not re-armed on SIGTERM"
+            time.sleep(0.02)
+
+        process.stdin.close()
+        process.wait(timeout=5)
+    finally:
+        stop_process(process)
 
 
 def test_profiles_ini_default_resolution(root: Path) -> None:

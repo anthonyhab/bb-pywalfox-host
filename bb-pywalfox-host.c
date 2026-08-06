@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -639,6 +640,15 @@ static int install_manifest(const char *executable_path) {
     return result == 0 ? 0 : 1;
 }
 
+static volatile sig_atomic_t rearm_requested = 0;
+
+static void on_terminate(int signal_number) {
+    (void)signal_number;
+    /* Best-effort: Firefox may kill the host without closing the pipe.
+     * Only flag; the main loop performs the (non-signal-safe) write. */
+    rearm_requested = 1;
+}
+
 int main(int argc, char *argv[]) {
     char colors_path[PATH_MAX];
     if (get_colors_path(colors_path, sizeof(colors_path)) != 0) {
@@ -684,7 +694,16 @@ int main(int argc, char *argv[]) {
      * before this host even spawns, via the previous shutdown's write). */
     css_write_boot_fallback(colors_path);
 
+    struct sigaction termination = {0};
+    termination.sa_handler = on_terminate;
+    sigaction(SIGTERM, &termination, NULL);
+    sigaction(SIGINT, &termination, NULL);
+
     for (;;) {
+        if (rearm_requested) {
+            rearm_requested = 0;
+            css_write_boot_fallback(colors_path);
+        }
         if (inotify_fd < 0) {
             inotify_fd = setup_inotify(
                 colors_path,
