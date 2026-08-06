@@ -299,7 +299,7 @@ def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
             assert time.monotonic() < deadline, "fallback not written at spawn"
             time.sleep(0.02)
         css = fallback.read_text(encoding="utf-8")
-        assert "#101014" in css, "fallback must bake the palette background"
+        assert "invert(1) hue-rotate(180deg)" in css, "fallback must invert pages"
         assert "html:not([data-darkreader-scheme]) body" in css
 
         send(process, {"action": "debug:version"})
@@ -315,7 +315,7 @@ def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
         while not fallback.exists():
             assert time.monotonic() < deadline, "fallback not re-armed at shutdown"
             time.sleep(0.02)
-        assert "#101014" in fallback.read_text(encoding="utf-8")
+        assert "invert(1)" in fallback.read_text(encoding="utf-8")
     finally:
         stop_process(process)
 
@@ -367,7 +367,7 @@ def test_profiles_ini_default_resolution(root: Path) -> None:
         process.wait(timeout=5)
         expected = firefox_dir / "3ix5m4nz.default-release" / "chrome" / "palette-boot.css"
         assert expected.exists(), "fallback must land in the install-declared profile"
-        assert "#123456" in expected.read_text(encoding="utf-8")
+        assert "invert(1)" in expected.read_text(encoding="utf-8")
         wrong = firefox_dir / "7aybxa48.default" / "chrome" / "palette-boot.css"
         assert not wrong.exists(), "must not pick the legacy Default=1 profile"
     finally:
