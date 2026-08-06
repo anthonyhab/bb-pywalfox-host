@@ -395,6 +395,15 @@ static void handle_css_action(const char *action, const char *message) {
 }
 
 static void handle_native_message(const char *message, const char *colors_path) {
+    static int boot_fallback_cleared = 0;
+    if (!boot_fallback_cleared) {
+        /* First extension message proves the extension is booted: the
+         * boot-time page fallback is no longer needed (and would otherwise
+         * keep darkening sites whose theme is toggled off). */
+        boot_fallback_cleared = 1;
+        css_remove_boot_fallback();
+    }
+
     char action[64];
     if (!bb_json_get_action(message, action, sizeof(action))) {
         send_invalid_action(NULL);
@@ -671,6 +680,10 @@ int main(int argc, char *argv[]) {
     );
     int watch_needs_sync = inotify_fd < 0;
 
+    /* Ensure the boot-time page fallback exists (covers pages loading
+     * before this host even spawns, via the previous shutdown's write). */
+    css_write_boot_fallback(colors_path);
+
     for (;;) {
         if (inotify_fd < 0) {
             inotify_fd = setup_inotify(
@@ -735,5 +748,8 @@ int main(int argc, char *argv[]) {
         unlink(socket_path);
     }
     if (inotify_fd >= 0) close(inotify_fd);
+
+    /* Re-arm the fallback for the next session's boot window. */
+    css_write_boot_fallback(colors_path);
     return 0;
 }

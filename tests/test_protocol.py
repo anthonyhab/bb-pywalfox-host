@@ -269,7 +269,58 @@ def main() -> None:
             stop_process(process)
 
         test_self_healing_watch(root, environment)
+        test_boot_fallback_lifecycle(root, environment)
+
+
+def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
+    colors_path = root / "colors.json"
+    socket_path = root / "fallback.sock"
+    profile_path = root / "fallback-profile"
+    profile_path.mkdir()
+    write_colors(colors_path, "#101014")
+
+    environment = base_environment.copy()
+    environment["PYWALFOX_COLORS_PATH"] = str(colors_path)
+    environment["PYWALFOX_SOCKET_PATH"] = str(socket_path)
+    environment["PYWALFOX_PROFILE_PATH"] = str(profile_path)
+
+    fallback = profile_path / "chrome" / "palette-boot.css"
+    process = subprocess.Popen(
+        [HOST, "moz-extension://pywalfox-test/"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+        env=environment,
+    )
+    try:
+        deadline = time.monotonic() + 1.0
+        while not fallback.exists():
+            assert time.monotonic() < deadline, "fallback not written at spawn"
+            time.sleep(0.02)
+        css = fallback.read_text(encoding="utf-8")
+        assert "#101014" in css, "fallback must bake the palette background"
+        assert "html:not([data-darkreader-scheme]) body" in css
+
+        send(process, {"action": "debug:version"})
+        assert receive(process, 1.0)["action"] == "debug:version"
+        deadline = time.monotonic() + 1.0
+        while fallback.exists():
+            assert time.monotonic() < deadline, "fallback not removed after boot"
+            time.sleep(0.02)
+
+        process.stdin.close()
+        process.wait(timeout=5)
+        deadline = time.monotonic() + 1.0
+        while not fallback.exists():
+            assert time.monotonic() < deadline, "fallback not re-armed at shutdown"
+            time.sleep(0.02)
+        assert "#101014" in fallback.read_text(encoding="utf-8")
+    finally:
+        stop_process(process)
 
 
 if __name__ == "__main__":
     main()
+
+
