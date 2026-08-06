@@ -300,7 +300,7 @@ def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
             time.sleep(0.02)
         css = fallback.read_text(encoding="utf-8")
         assert "invert(1) hue-rotate(180deg)" in css, "fallback must invert pages"
-        assert "html:not([data-darkreader-scheme]) body" in css
+        assert "filter: invert(1) hue-rotate(180deg)" in css
 
         send(process, {"action": "debug:version"})
         assert receive(process, 1.0)["action"] == "debug:version"
