@@ -270,7 +270,7 @@ def main() -> None:
 
         test_self_healing_watch(root, environment)
         test_boot_fallback_lifecycle(root, environment)
-
+        test_profiles_ini_default_resolution(root)
 
 def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
     colors_path = root / "colors.json"
@@ -320,7 +320,59 @@ def test_boot_fallback_lifecycle(root: Path, base_environment: dict) -> None:
         stop_process(process)
 
 
+
+
+def test_profiles_ini_default_resolution(root: Path) -> None:
+    """The [Install*] Default is the profile DIRECTORY name: the resolver must
+    match it against Path=, not Name=, and prefer it over a legacy Default=1
+    section (which may belong to an unrelated old profile)."""
+    home = root / "home"
+    firefox_dir = home / ".mozilla" / "firefox"
+    firefox_dir.mkdir(parents=True)
+    (firefox_dir / "profiles.ini").write_text(
+        "[Install4F96D1932A9F858E]\n"
+        "Default=3ix5m4nz.default-release\n"
+        "Locked=1\n\n"
+        "[Profile1]\n"
+        "Name=default\n"
+        "Path=7aybxa48.default\n"
+        "Default=1\n\n"
+        "[Profile0]\n"
+        "Name=default-release\n"
+        "Path=3ix5m4nz.default-release\n",
+        encoding="utf-8",
+    )
+    (firefox_dir / "7aybxa48.default").mkdir()
+    (firefox_dir / "3ix5m4nz.default-release").mkdir()
+    wal_dir = home / ".cache" / "wal"
+    wal_dir.mkdir(parents=True)
+    write_colors(wal_dir / "colors.json", "#123456")
+
+    environment = os.environ.copy()
+    environment["HOME"] = str(home)
+    environment.pop("PYWALFOX_PROFILE_PATH", None)
+    environment.pop("PYWALFOX_COLORS_PATH", None)
+    environment["PYWALFOX_SOCKET_PATH"] = str(root / "ini.sock")
+
+    process = subprocess.Popen(
+        [HOST, "start"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+        env=environment,
+    )
+    try:
+        process.stdin.close()
+        process.wait(timeout=5)
+        expected = firefox_dir / "3ix5m4nz.default-release" / "chrome" / "palette-boot.css"
+        assert expected.exists(), "fallback must land in the install-declared profile"
+        assert "#123456" in expected.read_text(encoding="utf-8")
+        wrong = firefox_dir / "7aybxa48.default" / "chrome" / "palette-boot.css"
+        assert not wrong.exists(), "must not pick the legacy Default=1 profile"
+    finally:
+        stop_process(process)
+
+
 if __name__ == "__main__":
     main()
-
-

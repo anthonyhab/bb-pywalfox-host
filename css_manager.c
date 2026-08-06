@@ -76,6 +76,7 @@ static int get_profile_path(char *profile_path, size_t size) {
     size_t capacity = 0;
     char section[64] = "";
     char install_default[64] = "";
+    char named_default[64] = "";
     char default_section[64] = "";
     char first_profile[64] = "";
 
@@ -101,6 +102,19 @@ static int get_profile_path(char *profile_path, size_t size) {
             if (!first_profile[0]) {
                 snprintf(first_profile, sizeof(first_profile), "%s", section);
             }
+            if (strcasecmp(key, "Name") == 0 &&
+                install_default[0] && strcmp(setting, install_default) == 0) {
+                if (!named_default[0]) {
+                    snprintf(named_default, sizeof(named_default), "%s", section);
+                }
+            }
+            /* [Install*] Default holds the profile DIRECTORY name, which is
+             * the section's Path=, not its Name=. Match both; Path is the
+             * authoritative one and wins when they differ. */
+            if (strcasecmp(key, "Path") == 0 &&
+                install_default[0] && strcmp(setting, install_default) == 0) {
+                snprintf(named_default, sizeof(named_default), "%s", section);
+            }
             if (strcasecmp(key, "Default") == 0 && strcmp(setting, "1") == 0) {
                 snprintf(default_section, sizeof(default_section), "%s", section);
             }
@@ -109,9 +123,16 @@ static int get_profile_path(char *profile_path, size_t size) {
 
     const int read_error = ferror(file);
 
+    /* Resolution: [Install*] Default is either a [ProfileN] section or a
+     * profile NAME (modern Firefox). Prefer the install-declared default,
+     * then a legacy Default=1 profile, then the first profile section. */
     const char *selected = NULL;
-    if (install_default[0] && strncmp(install_default, "Profile", 7) == 0) {
-        selected = install_default;
+    if (install_default[0]) {
+        if (strncmp(install_default, "Profile", 7) == 0) {
+            selected = install_default;
+        } else if (named_default[0]) {
+            selected = named_default;
+        }
     }
     if (!selected) selected = default_section[0] ? default_section : NULL;
     if (!selected) selected = first_profile[0] ? first_profile : NULL;
@@ -620,6 +641,7 @@ static int fallback_chrome_path(char *chrome_path, size_t size) {
 }
 
 int css_write_boot_fallback(const char *colors_path) {
+    char dbg_profile[PATH_MAX];
     char bg[16];
     char fg[16];
     if (read_fallback_colors(colors_path, bg, sizeof(bg), fg, sizeof(fg)) != 0) {
