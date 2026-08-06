@@ -7,15 +7,15 @@ pkgdesc="Native messaging host for syncing pywal colors with Pywalfox (C version
 arch=('x86_64')
 url="https://github.com/anthonyhab/bb-pywalfox-host"
 license=('MIT')
-depends=('glibc')
-makedepends=('gcc')
+depends=('glibc' 'json-c')
+makedepends=('gcc' 'json-c')
 options=('!strip')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/anthonyhab/bb-pywalfox-host/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
     cd "$pkgname-$pkgver"
-    gcc -O2 -s -o bb-pywalfox-host bb-pywalfox-host.c
+    make
 }
 
 package() {

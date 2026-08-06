@@ -17,6 +17,7 @@ Perfect if you run multiple color watchers (Dark Reader, Pywalfox, etc.) and wan
 ## Requirements
 
 - Linux with inotify support
+- [json-c](https://github.com/json-c/json-c) (build and runtime dependency)
 - [Pywalfox extension](https://addons.mozilla.org/en-US/firefox/addon/pywalfox/) for Firefox
 - pywal or similar color generator
 
@@ -33,7 +34,7 @@ bb-pywalfox-host install
 
 ### Manual Build
 ```bash
-gcc -O2 -s -o bb-pywalfox-host bb-pywalfox-host.c
+make
 sudo install -Dm755 bb-pywalfox-host /usr/bin/bb-pywalfox-host
 bb-pywalfox-host install
 ```
@@ -87,8 +88,8 @@ If using theme hooks that call `pywalfox update` or similar, you can remove thos
 |--------|-------|
 | Binary size | ~22KB |
 | Memory usage | ~1MB |
-| Dependencies | None (glibc only) |
-| Build tools | gcc |
+| Dependencies | json-c (glibc) |
+| Build tools | gcc, make |
 
 ---
 
@@ -128,7 +129,7 @@ bb-pywalfox-host install
 # Clone and build
 git clone https://github.com/anthonyhab/bb-pywalfox-host.git
 cd bb-pywalfox-host
-gcc -O2 -s -o bb-pywalfox-host bb-pywalfox-host.c
+make
 
 # Install
 sudo install -Dm755 bb-pywalfox-host /usr/bin/bb-pywalfox-host
